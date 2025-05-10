@@ -25,11 +25,17 @@
         </div>
         
         <div class="history-container" id="history-container">
-          {% for item in history %}
-            <div class="history-item {% if forloop.first %}active{% endif %}" 
-                 data-query="{{ item.user_query }}" 
-                 data-response="{{ item.bot_response }}">
-              {{ item.user_query|truncatechars:30 }}
+          {% for session in sessions %}
+            <div class="history-item {% if session.id == active_session.id %}active{% endif %}" 
+                 data-session-id="{{ session.id }}">
+              <div class="session-title">{{ session.title }}</div>
+              <div class="session-time">{{ session.updated_at|date:"M d, H:i" }}</div>
+              <button class="delete-session-btn" data-session-id="{{ session.id }}">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
             </div>
           {% empty %}
             <div class="history-item">No conversations yet</div>
@@ -38,15 +44,11 @@
         
         <div class="sidebar-footer">
           <div class="user-profile">
-            <div class="user-avatar">{% if user.is_authenticated %}{{ user.username|first|upper }}{% else %}T{% endif %}</div>
+            <div class="user-avatar">{{ user.username|first|upper }}</div>
             <div class="user-details">
-              <span class="username">{% if user.is_authenticated %}{{ user.username }}{% else %}Thara{% endif %}</span>
+              <span class="username">{{ user.username }}</span>
               <div class="user-actions">
-                {% if user.is_authenticated %}
-                  <a href="{% url 'logout' %}" class="logout-btn">Logout</a>
-                {% else %}
-                  <a href="{% url 'login' %}" class="login-btn">Login</a>
-                {% endif %}
+                <a href="{% url 'logout' %}" class="logout-btn">Logout</a>
               </div>
             </div>
           </div>
@@ -63,11 +65,11 @@
               <line x1="3" y1="18" x2="21" y2="18"></line>
             </svg>
           </button>
-          <div class="chat-title">{% if history %}Chat History{% else %}New Chat{% endif %}</div>
+          <div class="chat-title">{{ active_session.title }}</div>
         </div>
         
         <div class="chat-container" id="chat-container">
-          {% if not history %}
+          {% if not messages %}
             <div class="message">
               <div class="message-avatar bot-avatar">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -83,7 +85,7 @@
             </div>
           {% endif %}
           
-          {% for item in history %}
+          {% for message in messages %}
             <div class="message">
               <div class="message-avatar user-avatar">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -92,7 +94,7 @@
                 </svg>
               </div>
               <div class="message-content">
-                <p>{{ item.user_query }}</p>
+                <p>{{ message.user_query }}</p>
               </div>
             </div>
             
@@ -106,8 +108,8 @@
                 </svg>
               </div>
               <div class="message-content">
-                <p>{{ item.bot_response }}</p>
-                <button class="message-speaker" data-message="{{ item.bot_response }}">
+                <p>{{ message.bot_response }}</p>
+                <button class="message-speaker" data-message="{{ message.bot_response }}">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M3 18v-6a9 9 0 0 1 18 0v6"></path>
                     <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path>

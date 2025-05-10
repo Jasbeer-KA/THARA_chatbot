@@ -1,4 +1,4 @@
-from django.shortcuts import render
+from django.shortcuts import render, redirect
 from django.http import JsonResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -10,12 +10,13 @@ import os
 import logging
 
 
-from django.shortcuts import render, redirect
 from django.contrib.auth import login, authenticate, logout
 from django.contrib import messages
 from django.contrib.auth.forms import AuthenticationForm
 from .forms import RegisterForm
-
+from django.contrib.auth.decorators import login_required
+from django.utils import timezone
+from .models import ChatSession, ChatMessage  # We'll create these models
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -26,10 +27,21 @@ os.makedirs(os.path.join(settings.BASE_DIR, 'media'), exist_ok=True)
 # Initialize the chatbot engine
 bot = ChatbotEngine()
 
+@login_required
 def home(request):
-    return render(request, 'base.html')
+    return redirect('chat')
 
+@login_required
 def chat_view(request):
+    # Get or create active session
+    active_session = ChatSession.objects.filter(user=request.user).order_by('-updated_at').first()
+    
+    if not active_session:
+        active_session = ChatSession.objects.create(
+            user=request.user,
+            title=f"Chat {timezone.now().strftime('%Y-%m-%d %H:%M')}"
+        )
+    
     if request.method == "POST":
         question = request.POST.get("question", "").strip()
         document = request.FILES.get("document")
@@ -37,14 +49,13 @@ def chat_view(request):
 
         if document:
             file_path = os.path.join(settings.BASE_DIR, 'media', document.name)
-
             try:
                 # Save file temporarily
                 with open(file_path, 'wb+') as destination:
                     for chunk in document.chunks():
                         destination.write(chunk)
 
-                logger.info(f"File uploaded: {document.name} by {'anonymous' if not request.user.is_authenticated else request.user.username}")
+                logger.info(f"File uploaded: {document.name} by {request.user.username}")
 
                 # Process file
                 content_type = document.content_type.lower()
@@ -60,7 +71,6 @@ def chat_view(request):
             except Exception as e:
                 logger.error(f"Error processing file {document.name}: {str(e)}", exc_info=True)
                 response = f"Error processing file: {str(e)}"
-
             finally:
                 if os.path.exists(file_path):
                     try:
@@ -73,23 +83,67 @@ def chat_view(request):
             logger.info(f"Processing text query: {question[:100]}...")
             response = bot.general_query(question)
 
-        # Save chat history
+        # Save chat history to database
         if question or document:
-            try:
-                bot.cursor.execute("INSERT INTO chat_history (user_query, bot_response) VALUES (?, ?)", (question, response))
-                bot.conn.commit()
-                logger.debug("Chat history updated")
-            except Exception as e:
-                logger.error(f"Error saving chat history: {str(e)}")
+            ChatMessage.objects.create(
+                session=active_session,
+                user_query=question or f"Uploaded file: {document.name}",
+                bot_response=response
+            )
+            # Update session title if it's the first message
+            if active_session.messages.count() == 1 and question:
+                active_session.title = question[:50] + ("..." if len(question) > 50 else "")
+            active_session.updated_at = timezone.now()
+            active_session.save()
 
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return JsonResponse({"response": response})
 
-        return render(request, 'base.html', {"response": response})
+    # Get all sessions and messages for the current user
+    sessions = ChatSession.objects.filter(user=request.user).order_by('-updated_at')
+    messages = active_session.messages.all().order_by('timestamp') if active_session else []
+    
+    return render(request, 'base.html', {
+        "active_session": active_session,
+        "sessions": sessions,
+        "messages": messages,
+        "response": response if 'response' in locals() else None,
+        "question": question if 'question' in locals() else None
+    })
 
-    return render(request, 'base.html')
 
 
+@login_required
+def new_session(request):
+    new_session = ChatSession.objects.create(
+        user=request.user,
+        title=f"Chat {timezone.now().strftime('%Y-%m-%d %H:%M')}"
+    )
+    return redirect('chat')
+
+
+@login_required
+def load_session(request, session_id):
+    try:
+        session = ChatSession.objects.get(id=session_id, user=request.user)
+        return redirect('chat')
+    except ChatSession.DoesNotExist:
+        return redirect('chat')
+
+
+@login_required
+def delete_session(request, session_id):
+    if request.method == "POST":
+        try:
+            session = ChatSession.objects.get(id=session_id, user=request.user)
+            session.delete()
+            return JsonResponse({"status": "success"})
+        except ChatSession.DoesNotExist:
+            return JsonResponse({"status": "error", "message": "Session not found"}, status=404)
+    return JsonResponse({"status": "error", "message": "Invalid request"}, status=400)
+
+
+# Keep your existing API views and auth views unchanged
 class DocumentUploadView(APIView):
     parser_classes = [MultiPartParser]
 
@@ -146,19 +200,18 @@ def debug_upload(request):
     return Response({'error': 'No file received'}, status=400)
 
 
-
-
 def register_view(request):
     if request.method == "POST":
         form = RegisterForm(request.POST)
         if form.is_valid():
             user = form.save()
             login(request, user)
-            return redirect("home")  # Redirect to your main page
+            return redirect("home")
     else:
         form = RegisterForm()
     
     return render(request, "register.html", {"form": form})
+
 
 def login_view(request):
     if request.method == "POST":
@@ -184,8 +237,3 @@ def login_view(request):
 def logout_view(request):
     logout(request)
     return redirect("login")
-
-
-# # reg_f/views.py
-def check_phishing_view(request):
-    return render(request, "home.html")  # Create this template
